@@ -10859,6 +10859,7 @@ window.MV_BK = (function () {
       // El orden importa: primero se repone lo que faltaba, DESPUÉS se siembra
       // el perfil (así la semilla no ocupa el lugar de tu histórico real) y se
       // purga (así la purga no se deshace en el siguiente arranque).
+      try { chequearBorrado(); } catch (e) {}
       try { seedPerfil(); } catch (e) {}
       try { purgeOldDailyKeys(); } catch (e) {}
       // Siempre se repinta: la semilla y la purga acaban de tocar el registro,
@@ -10891,17 +10892,64 @@ window.MV_BK = (function () {
 
 // Red de seguridad: si IndexedDB no existe o tarda, la semilla y la purga
 // corren igual a los 2.5 s para no dejar la app sin datos de arranque.
-var _arranqueHecho = false;
-function arranqueDatos() {
-  if (_arranqueHecho) return; _arranqueHecho = true;
+// ─── TERCERA RED: una cookie testigo ───────────────────────────────────────
+// Safari en iPhone puede vaciar localStorage E IndexedDB de golpe. Las cookies
+// sobreviven a evicciones distintas, así que guardamos aquí una señal mínima:
+// "este teléfono YA usó la app". Si arrancamos sin datos pero con testigo,
+// NO sembramos un perfil de fábrica — avisamos que se borró y ofrecemos el
+// respaldo. Fingir instalación nueva es lo que hace que pierdas el registro.
+function testigoLeer() {
+  try { var m = document.cookie.match(/(?:^|;\s*)mv_vivo=([^;]*)/); return m ? decodeURIComponent(m[1]) : null; }
+  catch (e) { return null; }
+}
+function testigoEscribir(v) {
+  try { document.cookie = 'mv_vivo=' + encodeURIComponent(v) + ';path=/;max-age=63072000;SameSite=Lax'; } catch (e) {}
+}
+function hayDatosPropios() {
+  try {
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && (k.indexOf('diario-') === 0 || k.indexOf('jal2-') === 0 || k === 'pesoLog' || k === 'marcasDias' || k === 'racha')) return true;
+    }
+  } catch (e) {}
+  return false;
+}
+var _avisoHecho = false;
+function chequearBorrado() {
+  if (_avisoHecho) return; _avisoHecho = true;
+  try { if (!hayDatosPropios() && testigoLeer()) avisoBorrado(); } catch (e) {}
+  try { testigoEscribir(String(Date.now())); } catch (e) {}
+}
+function avisoBorrado() {
+  if (document.getElementById('mv-aviso-borrado')) return;
+  var d = document.createElement('div');
+  d.id = 'mv-aviso-borrado';
+  d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:12500;background:#4a1010;color:#ffd8d8;border-bottom:1px solid #7a2626;padding:12px 14px;font-size:12px;line-height:1.55;font-family:inherit';
+  d.innerHTML = '⚠️ <b>Safari borró los datos guardados de esta app.</b> No es que hayas perdido el protocolo: es el navegador limpiando almacenamiento. ' +
+    '<button onclick="importarDatos()" style="margin-top:8px;width:100%;background:rgba(255,255,255,0.14);border:1px solid rgba(255,255,255,0.3);color:#fff;padding:9px;border-radius:10px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">📥 Restaurar desde mi backup</button>' +
+    '<button onclick="this.parentNode.remove()" style="margin-top:6px;width:100%;background:transparent;border:none;color:rgba(255,216,216,0.65);padding:6px;font-size:11px;font-family:inherit;cursor:pointer">Empezar de cero</button>';
+  document.body.appendChild(d);
+}
+
+var _arranqueHecho = false, _espejoRespondio = false;
+function arranqueDatos(forzar) {
+  if (_arranqueHecho) return; 
+  // Si el espejo todavía no contesta, NO sembramos: un perfil de fábrica encima
+  // de tu histórico es exactamente lo que se ve como "se borró todo".
+  if (!_espejoRespondio && !forzar) { try { initHoy(); } catch (e) {} return; }
+  _arranqueHecho = true;
+  try { chequearBorrado(); } catch (e) {}
   try { seedPerfil(); } catch (e) {}
   try { purgeOldDailyKeys(); } catch (e) {}
   try { initHoy(); } catch (e) {}
 }
 setTimeout(function () {
-  try { MV_BK.rehidratar().then(function () { _arranqueHecho = true; }); } catch (e) { arranqueDatos(); }
+  try { MV_BK.rehidratar().then(function () { _espejoRespondio = true; arranqueDatos(true); },
+                                function () { _espejoRespondio = true; arranqueDatos(true); }); }
+  catch (e) { _espejoRespondio = true; arranqueDatos(true); }
 }, 120);
-setTimeout(arranqueDatos, 2500);   // ya no hay carrera: la reposición pisa la semilla
+setTimeout(function () { arranqueDatos(false); }, 2500);   // pinta pantalla, aún sin sembrar
+setTimeout(function () { arranqueDatos(true);  }, 9000);   // último recurso: el espejo nunca contestó
 
 // Al minimizar o cerrar, cerramos con una copia fresca
 document.addEventListener('visibilitychange', function () {
@@ -11066,7 +11114,7 @@ try { renderSplitBar('f2'); } catch(e) {}
     </div>
 
     <div style="text-align:center;font-size:9.5px;color:rgba(140,154,170,0.55);margin:14px 0 4px;line-height:1.6">
-      Fitness&nbsp;MV <b style="color:rgba(212,175,55,0.75)">v2.0</b> · 6 ago 2026<br>
+      Fitness&nbsp;MV <b style="color:rgba(212,175,55,0.75)">v2.1</b> · 6 ago 2026<br>
       <span style="opacity:.75">Si acabas de subir una versión nueva y aquí sigue saliendo la anterior, es el caché del navegador.</span>
     </div>
   </div>
